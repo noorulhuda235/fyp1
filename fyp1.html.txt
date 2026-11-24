@@ -1,0 +1,78 @@
+"""
+Graph Construction Module for Transaction Fraud Detection
+Converts tabular financial transactions into a PyTorch Geometric graph structure.
+"""
+
+import pandas as pd
+import torch
+from torch_geometric.data import Data
+
+
+def create_sample_transactions() -> pd.DataFrame:
+    """
+    Generates a small synthetic dataset of financial transactions.
+    Replace this function with a CSV loader (e.g., PaySim or Elliptic dataset) later.
+    """
+    data = {
+        "sender_id": [0, 1, 2, 3, 4, 2, 0],
+        "receiver_id": [1, 2, 0, 4, 5, 3, 5],
+        "amount": [150.0, 4500.0, 4450.0, 80.0, 9200.0, 300.0, 50.0],
+        "is_fraud": [0, 1, 1, 0, 1, 0, 0],  # 1 = Fraudulent transaction, 0 = Legitimate
+    }
+    return pd.DataFrame(data)
+
+
+def build_transaction_graph(df: pd.DataFrame) -> Data:
+    """
+    Transforms a transaction DataFrame into a PyTorch Geometric Data object.
+    
+    Nodes: Unique financial accounts
+    Edges: Directed money transfers (sender -> receiver)
+    Node Features: [Total Sent Amount, Total Received Amount, Transaction Count]
+    """
+    # Identify all unique accounts (nodes)
+    unique_accounts = sorted(set(df["sender_id"]).union(set(df["receiver_id"])))
+    num_nodes = len(unique_accounts)
+    account_to_idx = {acc: idx for idx, acc in enumerate(unique_accounts)}
+
+    # Build Edge Index (shape: [2, num_edges])
+    senders = [account_to_idx[s] for s in df["sender_id"]]
+    receivers = [account_to_idx[r] for r in df["receiver_id"]]
+    edge_index = torch.tensor([senders, receivers], dtype=torch.long)
+
+    # Build Edge Attributes (Transaction Amount) and Edge Labels (Fraud Flag)
+    edge_attr = torch.tensor(df["amount"].values, dtype=torch.float).unsqueeze(1)
+    edge_labels = torch.tensor(df["is_fraud"].values, dtype=torch.long)
+
+    # Compute Basic Node Features: [total_sent, total_received, tx_count]
+    node_features = torch.zeros((num_nodes, 3), dtype=torch.float)
+    for _, row in df.iterrows():
+        s_idx = account_to_idx[row["sender_id"]]
+        r_idx = account_to_idx[row["receiver_id"]]
+        amt = row["amount"]
+
+        node_features[s_idx, 0] += amt  # Total sent
+        node_features[s_idx, 2] += 1    # Outgoing tx count
+        node_features[r_idx, 1] += amt  # Total received
+        node_features[r_idx, 2] += 1    # Incoming tx count
+
+    # Package everything into a PyTorch Geometric Data object
+    graph_data = Data(
+        x=node_features,
+        edge_index=edge_index,
+        edge_attr=edge_attr,
+        y=edge_labels,
+    )
+    return graph_data
+
+
+if __name__ == "__main__":
+    print("Initializing Transaction Graph Builder...")
+    transactions_df = create_sample_transactions()
+    fraud_graph = build_transaction_graph(transactions_df)
+
+    print("\n--- Graph Summary ---")
+    print(f"Total Accounts (Nodes): {fraud_graph.num_nodes}")
+    print(f"Total Transactions (Edges): {fraud_graph.num_edges}")
+    print(f"Node Feature Matrix Shape: {fraud_graph.x.shape}")
+    print(f"Fraudulent Transactions Count: {int(fraud_graph.y.sum())}")
